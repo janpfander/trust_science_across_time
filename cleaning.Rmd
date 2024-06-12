@@ -1103,3 +1103,12 @@ write_csv(barometer_cleaned, "data/wissenschaftsbarometer/wissenschaftsbarometer
 
 Hi Jan !
 
+blablabla
+ofpjfeofe
+
+```{r}
+#hi
+
+```
+
+
