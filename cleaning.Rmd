@@ -1101,3 +1101,16 @@ write_csv(barometer_cleaned, "data/wissenschaftsbarometer/wissenschaftsbarometer
 
 ## Some example change
 
+Hi Jan !
+
+blablabla
+ofpjfeofe
+
+This is good, but I would add this. 
+
+```{r}
+#hi
+7+3
+```
+
+
