@@ -1,0 +1,1103 @@
+---
+title: "cleaning"
+output: html_document
+date: "2022-12-15"
+bibliography: references.bib
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(haven) # read stata data
+```
+
+For all data sets we extract the following variables: 
+
+- `trust`
+- `id`
+- `country`
+- `date` (for panel data sets that are on a smaller scale than years)
+- `year`
+- `scale`
+
+For some data sets, we might export additional variables. 
+
+# General Social Survey US {gss_cross}
+
+```{r, message=FALSE}
+# read data
+gss_cross <- read_dta("./data/gss_cross/gss7222_r2.dta")
+```
+
+## Trust
+
+-   `CONSCI`: "(I am going to name some institutions in this country. As far as the people running these institutions are concerned, would you say you have a great deal of confidence, only some confidence, or hardly any confidence at all in them?) Scientific Community" (1 = a great deal, 2 = only some, 3 = hardly any, D = don't know, I = not applicable, s = skipped on web)
+
+We reverse the measure such that higher values represent higher trust. 
+
+```{r}
+# reverse scale and rename
+gss_cross <- gss_cross %>%
+  mutate(trust = 4 - consci)
+
+# check
+gss_cross[gss_cross$year == 1983, c("consci", "trust")]
+```
+
+## Covariates
+
+A `year` variable already exists. 
+
+```{r}
+gss_cross <- gss_cross %>% 
+  mutate(country = "United States", 
+         scale = max(gss_cross$trust, na.rm = TRUE)
+         )
+```
+
+### Other
+
+The GSS includes other institutional trust items that can serve as a baseline to evaluate the evolution of trust in science. 
+
+-   [`CONFINAN`] : "Banks and financial institutions"
+-   [`CONBUS`] : "Major companies"
+-   [`CONCLERG`] : "Organized religion"
+-   [`CONEDUC`] : "Education"
+-   [`CONFED`] : "Executive branch of the federal government"
+-   [`CONLABOR`] : "Organized Labor"
+-   [`CONPRESS`] : "Press"
+-   [`CONMEDIC`] : "Medicine"
+-   [`CONTV`] : "TV"
+-   [`CONJUDGE`] : "U.S. Supreme Court"
+-   [`CONSCI`] : "Scientific community"
+-   [`CONLEGIS`] : "Congress"
+-   [`CONARMY`] : "Military"
+
+All these variables are measured as follows: "I am going to name some institutions in this country. As far as the people running these institutions are concerned, would you say you have a great deal of confidence, only some confidence, or hardly any confidence at all in them?" {each of the 16 names of the above organizations} (1) A great deal confidence, (2) Only some confidence, (3) Hardly any confidence at all"
+
+```{r}
+# vector with all institutional trust variable names
+institutional_trust_variables <- c("conbus", "conclerg", "coneduc", "conlabor", "conpress", "contv", "conmedic", "confed", "conlegis", "conjudge", "consci",   "conarmy", "confinan") 
+
+# See in which year which measure was collected
+gss_cross %>% group_by(year) %>% 
+summarize(across(all_of(institutional_trust_variables), ~ mean(.x, na.rm=TRUE)
+                 )
+          )
+```
+
+Just as for `CONSCI` before, we reverse the coding for all institutional trust variables, such that higher values represent higher trust.
+
+```{r}
+# mini function that reverses the scale (such that higher = more confidence)
+reverse_scale <- function(x) (4-x)
+
+# check
+gss_cross %>% mutate(across(all_of(institutional_trust_variables), reverse_scale, .names = "recoded_{col}")) %>% 
+  select(recoded_conbus, conbus) %>% 
+  # make sure to select valid cases to check (in the first year, 
+  # trust in institutions wasn't collected) 
+  filter(!is.na(conbus))
+
+# recode
+gss_cross <- gss_cross %>%
+  mutate(across(all_of(institutional_trust_variables), reverse_scale)) 
+```
+## Export
+
+```{r}
+gss_cross_cleaned <- gss_cross %>% 
+  mutate(data = "gss_cross") %>% 
+  select(trust, scale, country, year, starts_with("con"), data)
+
+write_csv(gss_cross_cleaned, "data/gss_cross/gss_cross_cleaned.csv")
+```
+
+
+# Wellcome Global Monitor 2018 {wgm_2018}
+
+```{r, message=FALSE}
+wgm_2018 <- read_csv("data/wgm_2018/wgm_2018.csv")
+```
+
+## Trust
+
+- `Q11C`: "How much do you trust each of the following? How about scientists in this country? Do you trust them a lot, some, not much, or not at all?" (1=A lot, 2=Some, 3=Not much, 4=Not at all, 98=(DK), 99=(Refused))
+
+We re-label `NA`s. According to the codebook, `NA`s are coded as `98` and `99`. 
+
+```{r}
+# check response levels
+levels(as.factor(wgm_2018$Q11C))
+```
+
+```{r}
+# define NA values
+NA_responses <- c(98, 99)
+# mini function to assign NA's to values defined above
+recodeNAs <- function(x) (ifelse (x %in% NA_responses, NA, x))
+
+# check
+wgm_2018 %>% 
+  # make sure answers written to lower case
+  mutate(across(Q11C, recodeNAs, .names = "{.col}_recoded")
+         ) %>% 
+  select(Q11C, Q11C_recoded) %>% 
+  filter(is.na(Q11C_recoded))
+
+# recode
+wgm_2018 <- wgm_2018 %>% 
+  # make sure answers written to lower case
+  mutate(across(Q11C, recodeNAs)
+         ) 
+
+# check
+table(wgm_2018$Q11C, useNA = "always")
+```
+
+We reverse the coding such that higher values represent higher trust. 
+
+```{r}
+wgm_2018 <- wgm_2018 %>% 
+  mutate(trust = 5 - Q11C)
+
+# check
+wgm_2018[1:100, c("trust", "Q11C")]
+```
+
+## Covariates
+
+```{r}
+wgm_2018 <- wgm_2018 %>% 
+  mutate(year = 2018,
+         scale = max(trust, na.rm = TRUE)
+         )
+```
+
+### Country
+
+Country codes are available from the codebook.
+
+```{r}
+wgm_2018$WP5 <- as.factor(wgm_2018$WP5)
+levels(wgm_2018$WP5)
+
+wgm_2018$country <- wgm_2018$WP5 %>%
+  dplyr::recode(`1`= "United States", `2` ="Egypt", `3` ="Morocco", `4` ="Lebanon", `5` ="Saudi Arabia", `6` ="Jordan", `8` ="Turkey", `9` ="Pakistan", `10` ="Indonesia", `11` ="Bangladesh", `12` ="United Kingdom", `13` ="France", `14` ="Germany", `15` ="Netherlands", `16` ="Belgium", `17` ="Spain", `18` ="Italy", `19` ="Poland", `20` ="Hungary", `21` ="Czech Republic", `22` ="Romania", `23` ="Sweden", `24` ="Greece", `25` ="Denmark", `26` ="Iran", `28` ="Singapore", `29` ="Japan", `30` ="China", `31` ="India", `32` ="Venezuela", `33` ="Brazil", `34` ="Mexico", `35` ="Nigeria", `36` ="Kenya", `37` ="Tanzania", `38` ="Israel", `39` ="Palestinian Territories", `40` ="Ghana", `41` ="Uganda", `42` ="Benin", `43` ="Madagascar", `44` ="Malawi", `45` ="South Africa", `46` ="Canada", `47` ="Australia", `48` ="Philippines", `49` ="Sri Lanka", `50` ="Vietnam", `51` ="Thailand", `52` ="Cambodia", `53` ="Laos", `54` ="Myanmar", `55` ="New Zealand", `57` ="Botswana", `60` ="Ethiopia", `61` ="Mali", `62` ="Mauritania", `63` ="Mozambique", `64` ="Niger", `65` ="Rwanda", `66` ="Senegal", `67` ="Zambia", `68` ="South Korea", `69` ="Taiwan", `70` ="Afghanistan", `71` ="Belarus", `72` ="Georgia", `73` ="Kazakhstan", `74` ="Kyrgyzstan", `75` ="Moldova", `76` ="Russia", `77` ="Ukraine", `78` ="Burkina Faso", `79` ="Cameroon", `80` ="Sierra Leone", `81` ="Zimbabwe", `82` ="Costa Rica", `83` ="Albania", `84` ="Algeria", `87` ="Argentina", `88` ="Armenia", `89` ="Austria", `90` ="Azerbaijan", `96` ="Bolivia", `97` ="Bosnia and Herzegovina", `99` ="Bulgaria", `100` ="Burundi", `103` ="Chad", `104` ="Chile", `105` ="Colombia", `106` ="Comoros", `108` ="Republic of Congo", `109` ="Croatia", `111` ="Cyprus", `114` ="Dominican Republic", `115` ="Ecuador", `116` ="El Salvador", `119` ="Estonia", `121` ="Finland", `122` ="Gabon", `124` ="Guatemala", `125` ="Guinea", `128` ="Haiti", `129` ="Honduras", `130` ="Iceland", `131` ="Iraq", `132` ="Ireland", `134` ="Ivory Coast", `137` ="Kuwait", `138` ="Latvia", `140` ="Liberia", `141` ="Libya", `143` ="Lithuania", `144` ="Luxembourg", `145` ="Macedonia", `146` ="Malaysia", `148` ="Malta", `150` ="Mauritius", `153` ="Mongolia", `154` ="Montenegro", `155` ="Namibia", `157` ="Nepal", `158` ="Nicaragua", `160` ="Norway", `163` ="Panama", `164` ="Paraguay", `165` ="Peru", `166` ="Portugal", `173` ="Serbia", `175` ="Slovakia", `176` ="Slovenia", `183` ="Eswatini", `184` ="Switzerland", `185` ="Tajikistan", `186` ="The Gambia", `187` ="Togo", `190` ="Tunisia", `191` ="Turkmenistan", `193` ="United Arab Emirates", `194` ="Uruguay", `195` ="Uzbekistan", `197` ="Yemen", `198` ="Kosovo", `202` ="Northern Cyprus", .default = NA_character_)
+
+# check 
+wgm_2018 %>% 
+  group_by(country, WP5) %>% 
+  summarize(count = n())
+```
+
+## Export
+
+```{r}
+wgm_2018_cleaned <- wgm_2018  %>% 
+  mutate(data = "wgm_2018 ") %>% 
+  select(trust, scale, country, year, data)
+
+write_csv(wgm_2018_cleaned, "data/wgm_2018/wgm_2018_cleaned.csv")
+```
+
+# Wellcome Global Monitor 2020 {wgm_2020}
+
+```{r, message=FALSE}
+wgm_2020 <- read_csv("data/wgm_2020/wgm_2020.csv")
+```
+
+## Trust
+
+- `W5C`: "How much do you trust each of the following? Do you trust them a lot, some, not much,
+or not at all? If you don’t know, please just say so. How about scientists in this country?" (1=A lot, 2=Some, 3=Not much, 4=Not at all, 99=DK/Refused)
+
+We re-label `NA`s. According to the codebook, `NA`s are coded as `98` and `99`. 
+
+```{r}
+# check response levels
+levels(as.factor(wgm_2020$W5C))
+```
+
+```{r}
+# define NA values
+NA_responses <- c(99)
+# mini function to assign NA's to values defined above
+recodeNAs <- function(x) (ifelse (x %in% NA_responses, NA, x))
+
+# check
+wgm_2020 %>% 
+  # make sure answers written to lower case
+  mutate(across(W5C, recodeNAs, .names = "{.col}_recoded")
+         ) %>% 
+  select(W5C, W5C_recoded) %>% 
+  filter(is.na(W5C_recoded))
+
+# recode
+wgm_2020 <- wgm_2020 %>% 
+  # make sure answers written to lower case
+  mutate(across(W5C, recodeNAs)
+         ) 
+
+# check
+table(wgm_2020$W5C, useNA = "always")
+```
+
+We reverse the coding such that higher values represent higher trust. 
+
+```{r}
+# reverse scale
+wgm_2020 <- wgm_2020 %>% 
+  mutate(trust = 5 - W5C)
+
+# check
+wgm_2020[1:100, c("trust", "W5C")]
+```
+
+## Covariates
+
+```{r}
+wgm_2020 <- wgm_2020 %>% 
+  mutate(year = 2020, 
+         country = COUNTRYNEW,
+         scale = max(trust, na.rm = TRUE))
+```
+
+## Export
+
+```{r}
+wgm_2020_cleaned <- wgm_2020  %>% 
+  mutate(data = "wgm_2020 ") %>% 
+  select(trust, scale, country, year, data)
+
+write_csv(wgm_2020_cleaned, "data/wgm_2020/wgm_2020_cleaned.csv")
+```
+
+# KGSS (General Social Survey South Korea) {kgss}
+
+```{r, message=FALSE}
+kgss <- read_sav("data/kgss/2003-2021_KGSS_ENG_public_v1_07012022.sav")
+```
+
+## Trust
+
+-   `CONSCI`: "I am going to name some institutions in this country. As far as the people running these institutions are concerned, would you say you have a great deal of confidence, only some confidence, or hardly any confidence at all in them?... Scientific community" (1 = a great deal, 2 = only some, 3 = hardly any confidence at all, -8 = don't know, -1 = not applicable)
+
+We re-code `NA`s and reverse the scale such that higher values represent higher trust. 
+
+```{r}
+levels(as.factor(kgss$CONSCI))
+
+# Re-code NA's, reverse scale (such that higher = more trust) and rename variable
+kgss <- kgss %>% 
+  mutate(trust = ifelse(CONSCI < 0, NA, # recode NAs
+                              4 - CONSCI)) # reverse scale
+
+# check
+kgss[1:100, c("CONSCI", "trust")]
+```
+
+## Covariates
+
+```{r}
+kgss <- kgss %>% 
+  mutate(country = "South Korea", 
+         year = YEAR,
+         scale = max(trust, na.rm = TRUE)
+  )
+```
+
+## Export
+
+```{r}
+kgss_cleaned <- kgss  %>% 
+  mutate(data = "kgss ") %>% 
+  select(trust, scale, country, year, data)
+
+write_csv(kgss_cleaned, "data/kgss/kgss_cleaned.csv")
+```
+
+# Pew International Science Survey {pew_international}
+
+```{r, message=FALSE}
+# read data
+pew_international <- read_sav("./data/pew_international/2019-2020 Pew Research Center International Science Survey.sav")
+```
+
+## Trust
+
+-   `Q2d`: "Q2d. How much do you trust ____ to do what is right for (survey public) — a lot, some, not too much, or not at all? d. scientists" (1=A lot, 2=Some, 3=Not too much, 4=Not at all, 99=DK/Refused)
+
+We re-label `NA`s. According to the codebook, `NA`s are coded as `98` and `99`. 
+
+```{r}
+# check response levels
+levels(as.factor(pew_international$Q2d))
+```
+
+```{r}
+# define NA values
+NA_responses <- c(99)
+# mini function to assign NA's to values defined above
+recodeNAs <- function(x) (ifelse (x %in% NA_responses, NA, x))
+
+# recode
+pew_international <- pew_international %>% 
+  # make sure answers written to lower case
+  mutate(across(Q2d, recodeNAs)
+         ) 
+
+# check
+table(pew_international$Q2d, useNA = "always")
+```
+
+We reverse the coding such that higher values represent higher trust. 
+
+```{r}
+pew_international <- pew_international %>% 
+  mutate(trust = 5 - Q2d)
+
+# check
+wgm_2020[1:100, c("trust", "W5C")]
+```
+
+## Covariates
+
+```{r}
+pew_international <- pew_international %>% 
+  mutate(
+    # Values are numeric, but country names are stored in labels. Replace values with labels.
+    country = sjlabelled::to_character(pew_international$place),
+    # survey undertaken between end 2019, beginning 2020
+    year = 2020, 
+    scale = max(trust, na.rm = TRUE)
+  )
+```
+
+## Export
+
+```{r}
+pew_international_cleaned <- pew_international  %>% 
+  mutate(data = "pew_international ") %>% 
+  select(trust, scale, country, year, data)
+
+write_csv(pew_international_cleaned, "data/pew_international/pew_international_cleaned.csv")
+```
+
+# Pew American Trends Panel {pew_trends}
+
+This panel study consists of several different data sets. We store them in a list of data frames. 
+
+```{r}
+# Set the path to the directory containing subfolders with .sav files
+base_path <- "data/pew_trends/"
+
+# Get a list of subfolders
+subfolders <- list.dirs(base_path, full.names = FALSE, recursive = FALSE)
+
+# Initialize an empty list to store your data frames
+pew_trends <- list()
+
+# Loop through each subfolder
+for (subfolder in subfolders) {
+  # Get a list of .sav files in the subfolder
+  sav_files <- list.files(file.path(base_path, subfolder), pattern = "\\.sav$", full.names = TRUE)
+
+  # Read each .sav file and store it in the list
+  pew_trends[subfolder] <- lapply(sav_files, read_sav)
+}
+
+# Now, pew_trends contains all data frames as list elements with names corresponding to subfolder names
+```
+
+## Trust
+
+### Identify outcome across survey waves
+
+- 2016, May: `CONFD2_W17`
+
+```{r}
+sjlabelled::get_label(pew_trends$W17_May16$CONFD2_W17)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W17_May16$CONFD2_W17)
+```
+
+- 2018, Feb: `CONFF_W31`
+
+```{r}
+sjlabelled::get_label(pew_trends$W31_Feb18$CONFF_W31)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W31_Feb18$CONFF_W31)
+```
+
+- 2018, Nov: `CONF1f_W40`
+
+```{r}
+sjlabelled::get_label(pew_trends$W40_Nov18$CONF1f_W40)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W40_Nov18$CONF1f_W40)
+```
+
+- 2019, Jan: `CONFd_F2_W42`
+
+```{r}
+sjlabelled::get_label(pew_trends$W42_Jan19$CONFd_F2_W42)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W42_Jan19$CONFd_F2_W42)
+```
+
+- 2020, Apr: `CONF_g_W66`
+
+```{r}
+sjlabelled::get_label(pew_trends$W66_Apr20$CONF_g_W66)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W66_Apr20$CONF_g_W66)
+```
+
+- 2020, Nov: `CONF_g_W79`
+
+```{r}
+sjlabelled::get_label(pew_trends$W79_Nov20$CONF_g_W79)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W79_Nov20$CONF_g_W79)
+```
+
+- 2021, Dec: `CONF_g_W100`
+
+```{r}
+sjlabelled::get_label(pew_trends$W100_Dec21$CONF_g_W100)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W100_Dec21$CONF_g_W100)
+```
+
+- 2021, Dec: `CONF_g_W114`
+
+```{r}
+sjlabelled::get_label(pew_trends$W114_Sept22$CONF_g_W114)
+```
+
+```{r}
+sjlabelled::val_labels(pew_trends$W114_Sept22$CONF_g_W114)
+```
+
+### Rename 
+
+```{r}
+# List of original trust variable names
+original_trust_names <- c("CONFD2_W17", "CONFF_W31", "CONF1f_W40", "CONFd_F2_W42", "CONF_g_W66", "CONF_g_W79", "CONF_g_W100", "CONF_g_W114")
+
+# Function to rename trust variable in each data frame
+rename_trust_variable <- function(df) {
+  df %>%
+    rename(trust = any_of(original_trust_names))
+}
+
+# Apply the function to each data frame in the list
+pew_trends <- lapply(pew_trends, rename_trust_variable)
+
+# Now, pew_trends_renamed contains the data frames with the trust variable renamed to "trust"
+```
+
+### Rervse and code NA's
+
+We code invalid responses as `NA` and reverse the value coding such that higher values represent higher trust. 
+
+```{r}
+# define NA values
+NA_responses <- c(99)
+# mini function to assign NA's to values defined above
+recodeNAs <- function(x) (ifelse (as.numeric(x) %in% NA_responses, NA, x))
+
+# recode NAs in data frame and reverse scale
+recode_single_data_frame <- function(df) {
+  df <- df %>% 
+    # recode NAs
+    mutate(across(trust, recodeNAs)) %>% 
+    # reverse scale
+    mutate(across(trust, ~ 5-.x )) 
+}
+
+# Apply the function to each data frame in the list
+pew_trends <- lapply(pew_trends, recode_single_data_frame)
+```
+
+### Participants across waves
+
+From the codebook, we know that the variable `QKEY` is a unique identifier assigned to each respondent. `QKEY` can be used to link multiple panel waves together.
+
+```{r}
+# Create an empty data frame to store participant information
+participant_info <- data.frame()
+
+# Loop through each wave in the list
+for (wave_name in names(pew_trends)) {
+  # Get the data frame for the current wave
+  current_wave <- pew_trends[[wave_name]]
+
+  # Extract unique participants (QKEY) in the current wave
+  participants_in_wave <- unique(current_wave$QKEY)
+
+  # Create a data frame with participant information for the current wave
+  wave_participant_info <- data.frame(QKEY = participants_in_wave, wave = wave_name)
+
+  # Append the participant information to the main data frame
+  participant_info <- rbind(participant_info, wave_participant_info)
+}
+
+nrow(participant_info)
+```
+
+```{r}
+# summarize participant data
+summary <- participant_info %>% 
+  group_by(QKEY) %>% 
+  summarise(n_waves = n_distinct(wave))
+
+# as bar plot
+ggplot(summary, aes(x = n_waves)) +
+  geom_bar(stat = "count") +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, show.legend = FALSE) +
+  labs(x = "Waves per participant",
+       y = "N Participants present") +
+  theme_minimal()
+```
+
+This looks promising. However, in some survey waves, only a randomized subset of the sample was asked the trust in scientists question. 
+
+So, next, we want to know how many participants have valid responses per wave. 
+
+```{r}
+# Create an empty data frame to store participant information
+participant_info <- data.frame()
+
+# Loop through each wave in the list
+for (wave_name in names(pew_trends)) {
+  # Get the data frame for the current wave
+  current_wave <- pew_trends[[wave_name]]
+  
+  # filter out NA responses for trust
+  current_wave <- current_wave %>% drop_na(trust)
+
+  # Extract unique participants (QKEY) in the current wave
+  participants_in_wave <- unique(current_wave$QKEY)
+
+  # Create a data frame with participant information for the current wave
+  wave_participant_info <- data.frame(QKEY = participants_in_wave, wave = wave_name)
+
+  # Append the participant information to the main data frame
+  participant_info <- rbind(participant_info, wave_participant_info)
+}
+
+nrow(participant_info)
+```
+
+```{r}
+# summarize participant data
+summary <- participant_info %>% 
+  group_by(QKEY) %>% 
+  summarise(n_waves = n_distinct(wave))
+
+# as bar plot
+ggplot(summary, aes(x = n_waves)) +
+  geom_bar(stat = "count") +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, show.legend = FALSE) +
+  labs(x = "Waves per participant",
+       y = "N Participants valid answers") +
+  theme_minimal()
+```
+
+## Covariates
+
+Before building a common data frame, we will have to assign common names to covariates like we did for the `trust` variable above.
+
+Covariates we want to include are: 
+
+- 
+
+```{r}
+# # List of original trust variable names
+# original_trust_names <- c("CONFD2_W17", "CONFF_W31", "CONF1f_W40", "CONFd_F2_W42", "CONF_g_W66", "CONF_g_W79", "CONF_g_W100", "CONF_g_W114")
+# 
+# # Function to rename trust variable in each data frame
+# rename_trust_variable <- function(df) {
+#   df %>%
+#     rename(trust = any_of(original_trust_names))
+# }
+# 
+# # Apply the function to each data frame in the list
+# pew_trends <- lapply(pew_trends, rename_trust_variable)
+# 
+# # Now, pew_trends_renamed contains the data frames with the trust variable renamed to "trust"
+```
+
+### Date
+
+```{r}
+# Function to extract month and year from the data set name and add a new variable
+add_date_year <- function(df, wave_name) {
+  # Extract month and year from the name
+  month_year <- gsub(".*_(\\D+)(\\d+)", "\\1 \\2", wave_name)
+  
+  # Create a new variable 'date' with the corresponding date
+  df <- df %>% 
+    mutate(date = as.Date(paste(month_year, "01", sep = " "), 
+                          format = "%B %y %d"),
+           year = year(date)
+           
+           )
+  
+  return(df)
+}
+
+# Apply the function to each data frame in the list
+pew_trends <- Map(add_date_year, pew_trends, names(pew_trends))
+
+# Now, pew_trends contains the data frames with a new 'date' and 'year' variable
+```
+
+```{r}
+# Reduce all data frames in the list to variables starting with "CONF"
+pew_trends <- lapply(pew_trends, function(df) {
+  select(df, c(QKEY, trust, date, year))
+})
+
+# convert the list into a data frame
+pew_trends <- bind_rows(pew_trends) %>% 
+  rename(id = QKEY)
+```
+
+## Covariates
+
+```{r}
+pew_trends <- pew_trends %>% 
+  mutate(country = "United States", 
+         scale = max(trust, na.rm = TRUE)
+         )
+```
+
+## Export
+
+```{r}
+pew_trends_cleaned <- pew_trends  %>% 
+  mutate(data = "pew_trends") %>% 
+  select(id, trust, scale, date, year, country, data)
+
+write_csv(pew_trends_cleaned, "data/pew_trends/pew_trends_cleaned.csv")
+```
+
+# General Social Survey Panel (US) {gss_panel}
+
+The 2016 - 2020 file has only two waves (16 and 18 are two different panels, and 20 is the second wave for these two, see codebook)
+
+```{r}
+# Set the path to the directory containing .dta files
+data_folder <- "data/gss_panel/"
+
+# List all .dta files in the folder
+dta_files <- list.files(data_folder, pattern = "\\.dta$", full.names = TRUE)
+
+# read all .dta files in the folder into a list of data frames
+gss_panel <- setNames(lapply(dta_files, read_dta), 
+                  tools::file_path_sans_ext(basename(dta_files)))
+
+# change names
+names(gss_panel)
+new_names <- c("panel_06", "panel_08", "panel_10", "panel_20")
+names(gss_panel) <- new_names
+
+```
+
+## Trust
+
+`consci_*`: "I am going to name some institutions in this country. As far as the people running these institutions are concerned, would you say you have
+a great deal of confidence, only some confidence, or hardly any confidence at all in them?"
+
+```{r}
+sjlabelled::get_label(gss_panel$panel_06$consci_1)
+```
+
+```{r}
+sjlabelled::val_labels(gss_panel$panel_06$consci_1)
+```
+
+## Reduce and reshape data
+
+We start with reducing the data in order to reduce processing time. When reshaping, we also rename the `consci` variable into `trust`. 
+
+```{r}
+reshape_data <- function(df, panel_name) {
+  
+  # reduce data frame to key variables
+  reduced <- df %>%
+    select(starts_with("id_1"), starts_with("year_"), starts_with("con")) %>%
+    # add variables
+    mutate(panel = panel_name, 
+           country = "United States") %>% 
+    # Remove value labels from all variables in the data frame
+    mutate(across(everything(), ~haven::zap_labels(.))) %>% 
+    # rename id variable
+    rename(id = starts_with("id"))
+  
+  
+  # shape to long format
+  reshaped <- reduced %>%
+    pivot_longer(!c(starts_with("id"), panel, country), names_to = "oldname_wave", values_to = "score") %>%
+    separate_wider_delim(oldname_wave, delim = "_", names = c("old_name", "wave")) %>%
+    pivot_wider(names_from = old_name, values_from = score) %>% 
+    # rename trust variable
+    mutate(trust = consci)
+  
+  return(reshaped)
+}
+
+# Apply the function to each data frame in the list
+gss_panel <- lapply(names(gss_panel), function(panel_name) {
+  reshape_data(gss_panel[[panel_name]], panel_name)
+})
+
+names(gss_panel) <- new_names
+
+# The 2020 panel has two id columns, which are assigned to distinct individuals (depending on the starting wave). 
+gss_panel$panel_20 %>% 
+  filter(!is.na(id1) & !is.na(id2))
+
+# We merge them into one
+gss_panel$panel_20 <- gss_panel$panel_20 %>% 
+  mutate(id = ifelse(!is.na(id1), paste0(id1, "a"), 
+                     paste0(id2, "b"))) %>% 
+  select(id, everything()) %>%  # Move 'id' to the first column 
+  select(-c(id1, id2))
+
+```
+
+## Rervse and code NA's
+
+We code invalid responses as `NA` and reverse the value coding such that higher values represent higher trust. 
+
+```{r}
+# reverse scale
+reverse_scales <- function(df) {
+  df <- df %>% 
+    mutate(across(!c(starts_with("id"), year, panel, wave, country),
+                  ~ 4-.x ), 
+           id = as.character(id)) 
+}
+
+# Apply the function to each data frame in the list
+gss_panel <- lapply(gss_panel, reverse_scales)
+
+gss_panel$panel_20
+```
+
+## Make common data frame
+
+We store all panels in a single data frame. Importantly, we need to make sure that we create unique `id` values.
+
+```{r}
+# turn all into one single data set
+gss_panel <- bind_rows(gss_panel) %>% 
+  # make a unique id
+  mutate(id = paste0(id, "_", panel))
+```
+
+### Covariates
+
+We add a scale variable. 
+
+```{r}
+gss_panel <- gss_panel %>% 
+  mutate(scale = max(trust, na.rm = TRUE))
+```
+
+
+## Export
+
+```{r}
+gss_panel_cleaned <- gss_panel  %>% 
+  mutate(data = "gss_panel") %>% 
+  select(id, trust, scale, year, country, data)
+
+write_csv(gss_panel_cleaned, "data/gss_panel/gss_panel_cleaned.csv")
+```
+
+# Algan data
+
+```{r}
+algan <- read_dta("data/algan/CAUCP_data_v2.dta")
+```
+
+### Trust
+
+```{r}
+sjlabelled::get_label(algan$B4_7)
+```
+
+```{r}
+sjlabelled::val_labels(algan$B4_7)
+```
+
+The trust variable is already coded such that higher values represent higher trust, so no need to reverse code. We just rename it below. 
+
+## Covariates
+
+```{r}
+# Set options to avoid scientific notation for the id variable and display more digits
+options(scipen = 999, digits = 12)
+```
+
+```{r}
+algan <- algan %>% 
+  # rename and add covariates
+  mutate(
+    date = as.Date(DATEINTER, format = "%Y%m%d"),
+    year = year(date), 
+    trust = B4_7,
+    country = sub(".*\\.", "", sjlabelled::to_character(algan$country)), 
+    scale = max(trust, na.rm = TRUE)
+  ) %>% 
+  # reduce data
+  select(country, id, wave, date, trust, year, scale)
+
+algan  
+```
+
+## Export
+
+```{r}
+algan_cleaned <- algan  %>% 
+  mutate(data = "algan") %>% 
+  select(id, trust, scale, date, year, country, data)
+
+write_csv(algan_cleaned, "data/algan/algan_cleaned.csv")
+```
+
+# Panel data Daniel 
+
+```{r, message=FALSE}
+nettle <- read_csv("data/nettle/CCL_processed_data.csv")
+```
+
+## Trust
+
+`sciencetrust`: On a scale from 1-100, to what extent do you trust respectively: ...scientists (measured from February 2023 onwards)
+
+## Covariates
+
+### Date
+
+```{r}
+# check dates and transformation
+nettle$month_as_date <- as.Date(paste(nettle$month, "01", sep = "-"), 
+                          format = "%y-%b-%d")
+
+nettle$survey_date <- as.Date(
+  as.POSIXct(nettle$StartDate, format = "%m/%d/%Y %H:%M", tz = "UTC")
+)
+
+nettle %>% select(month_as_date , month, StartDate, survey_date)
+```
+
+The transformation is coherent with the old `month` variable, but the `StartDate` variable is sometimes later. From the codebook, we know that we should rely on the `StartDate` variable (the `month` variable is important for financial questions, which refer to the month preceeding the survey wave). 
+
+```{r}
+nettle <- nettle %>% 
+  # rename and add covariates
+  mutate(
+    date = as.Date(
+      as.POSIXct(StartDate, format = "%m/%d/%Y %H:%M", tz = "UTC")
+    ),
+    year = year(date), 
+    trust = sciencetrust,
+    scale = max(trust, na.rm = TRUE), 
+    id = pid
+  ) %>% 
+  # reduce data
+  select(country, id, date, trust, year, scale)
+
+nettle
+```
+## Export
+
+```{r}
+nettle_cleaned <- nettle  %>% 
+  mutate(data = "nettle") %>% 
+  select(id, trust, scale, date, year, country, data)
+
+write_csv(nettle_cleaned, "data/nettle/nettle_cleaned.csv")
+```
+
+# TISP data (for now only for France)
+
+
+# German Wissenschaftsbarometer
+
+```{r, message=FALSE}
+barometer <- read_sav("data/wissenschaftsbarometer/Datensatz_gemergt_final.sav")
+```
+
+## Trust
+
+The data contains several trust questions.
+
+```{r}
+# select all trust-related variables
+trust <- barometer %>% select(starts_with("trust"))
+
+# Extract variable names, labels, and value labels
+trust_items <- names(trust) %>%
+  map_df(~ {
+    var_name <- .x
+    var_label <- attr(barometer[[.x]], "label")
+    value_labels <- attr(barometer[[.x]], "labels")
+    
+    # Combine value labels into a single string
+    value_labels_str <- paste(names(value_labels), value_labels, sep = "=", collapse = "; ")
+    
+    tibble(Name = var_name, 
+           Label = var_label, 
+           Value_Labels = value_labels_str)
+  })
+
+# Print the data frame
+trust_items
+```
+
+```{r}
+# Get an overview of labels for the trust-related variables
+value_labels <- trust %>%
+  map(~ {
+    labels <- attr(., "labels")
+    tibble(value = names(labels), label = labels)
+  }) %>%
+  bind_rows(.id = "Variable")
+
+# check if they are always the same
+value_labels %>% 
+  group_by(label) %>% 
+  reframe(value = unique(value))
+# yes
+
+```
+
+Were all items asked in all waves? 
+
+```{r}
+barometer %>% 
+  pivot_longer(starts_with("trust"), 
+               names_to = "trust_item",
+               values_to = "score") %>% 
+  group_by(trust_item) %>% 
+  drop_na(score) %>% 
+  summarize(waves = n_distinct(wave), 
+            subjects = n_distinct(id))
+```
+
+The main variable that has been asked in 9 survey waves is:
+
+`trust1`: "Wie sehr vertrauen Sie Wissenschaft und Forschung?"
+
+```{r}
+table(barometer$trust1)
+```
+
+### Reverse and code NA's
+
+```{r}
+# Function to recode and reverse scale
+recode_and_reverse <- function(data, vars) {
+  data %>%
+    # make "6" NA
+    mutate(across(all_of(vars), ~ ifelse(. == 6, NA, .)
+                  )
+           ) %>%
+    # reverse values for 1 to 5
+    mutate(across(all_of(vars), ~ ifelse(!is.na(.), 6 - ., .)
+                  )
+           )
+}
+
+
+# Specify the variables to recode and reverse
+trust_items <- barometer %>% select(starts_with("trust")) %>% names(.)
+
+# Apply the function to the specified variables
+barometer <- recode_and_reverse(barometer, trust_items) 
+```
+
+## Covariates
+
+### Date
+
+```{r}
+# Function to convert wave values to dates and years
+convert_wave_to_date_and_year <- function(data) {
+  
+  # Extract the wave labels
+  wave_labels <- attr(data$wave, "labels")
+  
+  # Create a named vector to map wave values to their labels
+  wave_to_date <- setNames(names(wave_labels), wave_labels)
+  
+  
+  data %>%
+    mutate(
+      wave_label = as.character(wave_to_date[as.character(wave)]),
+      date = as.Date(paste0(wave_label, "/01"), format = "%Y/%m/%d"),
+      year = year(date)
+    )
+}
+
+# Apply the function to the barometer dataset
+barometer <- convert_wave_to_date_and_year(barometer)
+
+# test
+# test <- convert_wave_to_date_and_year(barometer)
+# table(test$year)
+```
+
+```{r}
+barometer %>% group_by(id) %>% 
+  summarise(date = n_distinct(date)) %>% 
+  group_by(date) %>% 
+  summarise(subjects = n_distinct(id))
+```
+
+```{r}
+barometer <- barometer %>% 
+  # rename and add covariates
+  mutate(
+    date = date,
+    year = year, 
+    trust = trust1,
+    scale = max(trust, na.rm = TRUE), 
+    id = id, 
+    country = "Germany"
+  ) %>% 
+  # reduce data
+  select(country, id, date, trust, year, scale)
+```
+## Export
+
+```{r}
+barometer_cleaned <- barometer  %>% 
+  mutate(data = "Wissenschaftsbarometer") %>% 
+  select(id, trust, scale, date, year, country, data)
+
+write_csv(barometer_cleaned, "data/wissenschaftsbarometer/wissenschaftsbarometer_cleaned.csv")
+```
+
+
+

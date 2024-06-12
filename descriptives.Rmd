@@ -1,0 +1,214 @@
+---
+title: "descriptives"
+output: html_document
+date: "2022-12-15"
+bibliography: references.bib
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(haven) # read stata data
+library(patchwork) # for combining plots
+```
+
+## Load data
+
+```{r, message=FALSE}
+# Set the path to the directory containing data files
+data_folder <- "data/"
+
+# List all files in the folder
+file_names <- list.files(data_folder, pattern = "cleaned.csv", recursive = TRUE,
+                        full.names = TRUE)
+
+# read all files in the folder into a list of data frames
+data_list <- setNames(lapply(file_names, read_csv), 
+                  sub("_cleaned", "", tools::file_path_sans_ext(basename(file_names))))
+
+# check names
+names(data_list)
+```
+
+## Make common data frame
+
+```{r}
+# check id column 
+# (necessary to be the same data type when merging to a single data frame)
+summarize_id_data_types <- function(data_list) {
+  # Create an empty data frame to store the summary
+  summary_df <- data.frame(DataFrame = character(), DataType = character(), stringsAsFactors = FALSE)
+  
+  # Loop through each data frame in the list
+  for (i in seq_along(data_list)) {
+    df <- data_list[[i]]
+    
+    # Check if 'id' column exists in the data frame
+    if ("id" %in% colnames(df)) {
+      # Get data type of 'id' column
+      data_type <- typeof(df$id)
+      
+      # Add the summary to the data frame
+      summary_df <- rbind(summary_df, data.frame(DataFrame = names(data_list)[i], DataType = data_type, stringsAsFactors = FALSE))
+    }
+  }
+  
+  return(summary_df)
+}
+
+# Assuming data_list is your list of data frames
+summary_result <- summarize_id_data_types(data_list)
+
+# View the summary
+print(summary_result)
+```
+
+
+```{r}
+# Define a function to turn the id variable into character for all data sets
+id_to_character <- function(df) {
+  
+  # Check if 'id' column exists in the data frame
+  if ("id" %in% colnames(df)) {
+    df %>%
+      mutate(id = as.character(id)) 
+  } else {
+      return(df)
+    }
+}
+
+# Use lapply to apply the function to each data frame in the list
+data_list <- lapply(data_list, id_to_character)
+
+# Combine the individual data frames into a single data frame
+data <- bind_rows(data_list, .id = "file_name")
+```
+
+## Overview of time span
+
+```{r}
+overview_time_span <- data %>% 
+  group_by(data) %>% 
+  reframe(year = unique(year)) %>% 
+  drop_na(year)
+
+ggplot(data = overview_time_span,
+       aes(x = year, y = data)) +
+  geom_tile() +
+  # make more detailed scale
+  scale_x_continuous(breaks = seq(1970, 
+                                  max(overview_time_span$year), by = 5)) +
+  # Add nice labels
+  labs(x = "Year", y = NULL) +
+  # Force all the tiles to have equal widths and heights
+  coord_equal() +
+  # Use a cleaner theme
+  theme_minimal()
+```
+
+## Panel data
+
+# Make a version with acutal data (year/month) on x axis. 
+
+First, we restrict the data to panel data and to valid responses only. 
+
+```{r}
+panel_data <- data %>% 
+  filter(!is.na(id) & data != "Wissenschaftsbarometer") %>% 
+  drop_na(trust)
+```
+
+All panel data is in long format. If we group by participant and count the observations, we get the number of waves a participant has been present in. 
+
+```{r}
+# count waves per participant
+waves_per_participant <- panel_data %>% 
+  group_by(id, data) %>% 
+  summarize(waves = n())
+
+# as bar plot
+ggplot(waves_per_participant, aes(x = waves)) +
+  geom_bar(stat = "count") +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, show.legend = FALSE, 
+            size = 2) +
+  labs(x = "Waves per participant",
+       y = "N Participants (valid answers)") +
+  theme_minimal() + 
+  facet_wrap(~data)
+```
+```{r}
+# # make one plot for each data frame
+# plot_list <- setNames(
+#   lapply(names(data_list), function(df_name) {
+#     
+#     # pick data frame
+#     df <- data_list[[df_name]] %>% 
+#       drop_na(trust)
+#     
+#     # Apply everything only to panel data
+#     if ("id" %in% colnames(df)) {
+#     
+#     # count waves per participant
+#     waves_per_participant <- df %>% 
+#       group_by(id, data) %>% 
+#       summarize(waves = n())
+#     
+#     # as bar plot
+#     wave_plot <- ggplot(waves_per_participant, aes(x = waves)) +
+#       geom_bar(stat = "count") +
+#       geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, show.legend = FALSE) +
+#       labs(x = "Waves per participant",
+#            y = "N Participants (valid answers)") +
+#       theme_minimal()
+#     
+#     return(wave_plot) 
+#     }
+#   }),
+#   names(data_list)
+# )
+# 
+# plot_list
+```
+
+```{r}
+# calculate general waves
+overview_panel <- panel_data %>% 
+  mutate(month = lubridate::round_date(date, unit = "month"))
+
+ggplot(data = overview_panel,
+       aes(x = month, y = data)) +
+  geom_tile() +
+  # make more detailed scale
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y", expand = c(0, 0)) +
+  # Add nice labels
+  labs(x = "Date", y = NULL) +
+  # Force all the tiles to have equal widths and heights
+  coord_equal() +
+  # Use a cleaner theme
+  theme_minimal() 
+```
+
+
+One plot for each panel: 
+
+check only valid responses, 
+
+make a plot as for pew (left)
+
+group by wave, then plot survey data rounded by month (for algan, nettle and pew, by year for gss), 
+
+```{r}
+# summarize participant data
+# summary <- participant_info %>% 
+#   group_by(QKEY) %>% 
+#   summarise(n_waves = n_distinct(wave))
+
+# as bar plot
+# ggplot(summary, aes(x = n_waves)) +
+#   geom_bar(stat = "count") +
+#   geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, show.legend = FALSE) +
+#   labs(x = "Waves per participant",
+#        y = "N Participants valid answers") +
+#   theme_minimal()
+```
+
+
