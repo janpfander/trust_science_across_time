@@ -623,10 +623,6 @@ ggplot(summary, aes(x = n_waves)) +
 
 Before building a common data frame, we will have to assign common names to covariates like we did for the `trust` variable above.
 
-Covariates we want to include are: 
-
-- 
-
 ```{r}
 # # List of original trust variable names
 # original_trust_names <- c("CONFD2_W17", "CONFF_W31", "CONF1f_W40", "CONFd_F2_W42", "CONF_g_W66", "CONF_g_W79", "CONF_g_W100", "CONF_g_W114")
@@ -643,21 +639,31 @@ Covariates we want to include are:
 # # Now, pew_trends_renamed contains the data frames with the trust variable renamed to "trust"
 ```
 
-### Date
+### Date and year
 
 ```{r}
-# Function to extract month and year from the data set name and add a new variable
 add_date_year <- function(df, wave_name) {
-  # Extract month and year from the name
-  month_year <- gsub(".*_(\\D+)(\\d+)", "\\1 \\2", wave_name)
+  # Define a lookup table for month abbreviations to full names
+  month_lookup <- c("Jan" = "January", "Feb" = "February", "Mar" = "March", 
+                    "Apr" = "April", "May" = "May", "Jun" = "June", 
+                    "Jul" = "July", "Aug" = "August", "Sept" = "September", 
+                    "Oct" = "October", "Nov" = "November", "Dec" = "December")
+  
+  # Extract month abbreviation and year from the name
+  month_abbr <- gsub(".*_(\\D+)(\\d+)", "\\1", wave_name)
+  year <- gsub(".*_(\\D+)(\\d+)", "\\2", wave_name)
+  
+  # Convert year to four-digit format
+  full_year <- paste0("20", year)
+  
+  # Convert month abbreviation to full month name
+  full_month <- month_lookup[month_abbr]
   
   # Create a new variable 'date' with the corresponding date
-  df <- df %>% 
-    mutate(date = as.Date(paste(month_year, "01", sep = " "), 
-                          format = "%B %y %d"),
-           year = year(date)
-           
-           )
+  df <- df %>%
+    mutate(date = as.Date(paste(full_month, full_year, "01", sep = " "), 
+                          format = "%B %Y %d"),
+           year = year(date))
   
   return(df)
 }
@@ -669,7 +675,7 @@ pew_trends <- Map(add_date_year, pew_trends, names(pew_trends))
 ```
 
 ```{r}
-# Reduce all data frames in the list to variables starting with "CONF"
+# Reduce all data frames in the list to certain variables 
 pew_trends <- lapply(pew_trends, function(df) {
   select(df, c(QKEY, trust, date, year))
 })
@@ -679,7 +685,13 @@ pew_trends <- bind_rows(pew_trends) %>%
   rename(id = QKEY)
 ```
 
-## Covariates
+
+```{r}
+# check 
+table(pew_trends$year, useNA = "always")
+```
+
+### Country and scale
 
 ```{r}
 pew_trends <- pew_trends %>% 
@@ -756,7 +768,7 @@ reshape_data <- function(df, panel_name) {
   reshaped <- reduced %>%
     pivot_longer(!c(starts_with("id"), panel, country), names_to = "oldname_wave", values_to = "score") %>%
     separate_wider_delim(oldname_wave, delim = "_", names = c("old_name", "wave")) %>%
-    pivot_wider(names_from = old_name, values_from = score) %>% 
+    pivot_wider(names_from = old_name, values_from = score) %>%
     # rename trust variable
     mutate(trust = consci)
   
@@ -769,10 +781,16 @@ gss_panel <- lapply(names(gss_panel), function(panel_name) {
 })
 
 names(gss_panel) <- new_names
+```
 
+### The 2020 panel 
+
+There are some peculiarities about the 2020 panel. There have been two versions for the first wave (a and b) and each participant only did one.
+
+```{r}
 # The 2020 panel has two id columns, which are assigned to distinct individuals (depending on the starting wave). 
 gss_panel$panel_20 %>% 
-  filter(!is.na(id1) & !is.na(id2))
+  filter(!is.na(id1) & !is.na(id2)) # no one with both variables not NA
 
 # We merge them into one
 gss_panel$panel_20 <- gss_panel$panel_20 %>% 
@@ -780,7 +798,32 @@ gss_panel$panel_20 <- gss_panel$panel_20 %>%
                      paste0(id2, "b"))) %>% 
   select(id, everything()) %>%  # Move 'id' to the first column 
   select(-c(id1, id2))
+```
 
+Due to the re-shape, there are empty rows for the version in the first wave that participants have not been assigned to. 
+
+```{r}
+gss_panel$panel_20 %>% 
+  select(id, year, wave)
+```
+
+We remove these empty rows. 
+
+```{r}
+gss_panel$panel_20 <- gss_panel$panel_20 %>% 
+  drop_na(year)
+```
+
+We also want a numeric wave variable.
+
+```{r}
+gss_panel$panel_20 <- gss_panel$panel_20 %>% 
+  # remove a's and b's from wave variable
+  mutate(wave = gsub("[^0-9]", "", wave))
+
+# check
+gss_panel$panel_20 %>% 
+  select(id, year, wave)
 ```
 
 ## Rervse and code NA's
@@ -799,7 +842,6 @@ reverse_scales <- function(df) {
 # Apply the function to each data frame in the list
 gss_panel <- lapply(gss_panel, reverse_scales)
 
-gss_panel$panel_20
 ```
 
 ## Make common data frame
@@ -811,9 +853,38 @@ We store all panels in a single data frame. Importantly, we need to make sure th
 gss_panel <- bind_rows(gss_panel) %>% 
   # make a unique id
   mutate(id = paste0(id, "_", panel))
+
 ```
 
-### Covariates
+## Covariates
+
+### Year
+
+It seems like there is no year indicated for quite a lot of observations
+
+```{r}
+table(gss_panel$year, useNA = "always")
+```
+
+All except for the 2020 panel are concerned
+
+```{r}
+gss_panel %>% 
+  group_by(panel) %>% 
+  summarise(NAs = sum(is.na(year)), 
+            valid_entries = sum(!is.na(year))
+            )
+```
+
+For the observations for which year is missing, none of the other variables have a valid entry. 
+
+```{r}
+gss_panel %>%
+  filter(is.na(year)) %>% 
+  select(-id, -panel, -country, -wave) %>%
+  summarise(across(everything(), ~ any(!is.na(.))))
+```
+### Scale
 
 We add a scale variable. 
 
@@ -821,7 +892,6 @@ We add a scale variable.
 gss_panel <- gss_panel %>% 
   mutate(scale = max(trust, na.rm = TRUE))
 ```
-
 
 ## Export
 
@@ -858,20 +928,54 @@ The trust variable is already coded such that higher values represent higher tru
 options(scipen = 999, digits = 12)
 ```
 
+### Year, country and trust
+
 ```{r}
 algan <- algan %>% 
   # rename and add covariates
   mutate(
-    date = as.Date(DATEINTER, format = "%Y%m%d"),
-    year = year(date), 
     trust = B4_7,
     country = sub(".*\\.", "", sjlabelled::to_character(algan$country)), 
     scale = max(trust, na.rm = TRUE)
-  ) %>% 
-  # reduce data
-  select(country, id, wave, date, trust, year, scale)
+  )
+```
 
-algan  
+### Date
+
+```{r}
+algan <- algan %>% 
+  # rename and add covariates
+  mutate(
+    date = as.Date(DATEINTER, format = "%Y%m%d")
+    )
+
+# check
+table(algan$date, useNA = "always")
+```
+
+Unfortunately, there is no interview date available for many of the interviews. We therefor have to enter an approximate date from the info we have from the paper about when the different waves took place: 
+
+"We administrated large-scale international surveys in four waves over the period from MarchtoDecember2020(Wave1= March 6 to 30, Wave 2 = April 15 to 20, Wave 3 = June 20 to July 1, Wave 4 = December 15 to 30)."
+
+We will pick the first time point of the the time span as an approximate interview date. 
+```{r}
+# Create the new date variable for NA cases based on wave
+algan <- algan %>%
+  mutate(date = if_else(is.na(date), 
+                        as.Date(case_when(
+                          wave == 1 ~ "2020-03-06",
+                          wave == 2 ~ "2020-04-15",
+                          wave == 3 ~ "2020-06-20",
+                          wave == 4 ~ "2020-12-15"
+                        )),
+                        date), 
+         # add a year variable
+         year = year(date), 
+  )
+
+# check
+table(algan$date, useNA = "always")
+table(algan$year, useNA = "always")
 ```
 
 ## Export
@@ -893,6 +997,11 @@ nettle <- read_csv("data/nettle/CCL_processed_data.csv")
 ## Trust
 
 `sciencetrust`: On a scale from 1-100, to what extent do you trust respectively: ...scientists (measured from February 2023 onwards)
+
+```{r}
+table(nettle$sciencetrust, useNA = "always")
+```
+
 
 ## Covariates
 
