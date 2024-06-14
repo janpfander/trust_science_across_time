@@ -24,9 +24,11 @@ For some data sets, we might export additional variables.
 # General Social Survey US {gss_cross}
 
 ```{r, message=FALSE}
+
 # read data
 gss_cross <- read_dta("./data/gss_cross/gss7222_r2.dta")
 ```
+
 
 ## Trust
 
@@ -102,15 +104,28 @@ gss_cross %>% mutate(across(all_of(institutional_trust_variables), reverse_scale
 gss_cross <- gss_cross %>%
   mutate(across(all_of(institutional_trust_variables), reverse_scale)) 
 ```
+
+## Knowledge
+
+```{r}
+
+knowledge_variables <- c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift", "evolved", "earthsun", "bigbang2", "bigbang1", "evolved2")
+
+gss_cross <- gss_cross %>% 
+  mutate(across(all_of(knowledge_variables), ~ ifelse(. == 1, TRUE, FALSE)))
+```
+
 ## Export
 
 ```{r}
 gss_cross_cleaned <- gss_cross %>% 
   mutate(data = "gss_cross") %>% 
-  select(trust, scale, country, year, starts_with("con"), data)
+  select(data, year, country, scale, trust, knowledge_variables, starts_with("con"))
 
 write_csv(gss_cross_cleaned, "data/gss_cross/gss_cross_cleaned.csv")
 ```
+
+
 
 
 # Wellcome Global Monitor 2018 {wgm_2018}
@@ -716,11 +731,14 @@ gss_panel <- setNames(lapply(dta_files, read_dta),
 # change names
 names(gss_panel)
 new_names <- c("panel_06", "panel_08", "panel_10", "panel_20")
+
 names(gss_panel) <- new_names
 
 ```
 
-## Trust
+
+
+## Trust and knowledge
 
 `consci_*`: "I am going to name some institutions in this country. As far as the people running these institutions are concerned, would you say you have
 a great deal of confidence, only some confidence, or hardly any confidence at all in them?"
@@ -733,16 +751,35 @@ sjlabelled::get_label(gss_panel$panel_06$consci_1)
 sjlabelled::val_labels(gss_panel$panel_06$consci_1)
 ```
 
-## Reduce and reshape data
+Knowledge variables (TRUE/FALSE questions) : "I would like to ask you a few short questions like those you might see on a television game show. For each statement that I read, please tell me if it is true or false. If you don't know or aren't sure, just tell me so, and we will skip to the next question. Remember true, false, or don’t know.)"
 
-We start with reducing the data in order to reduce processing time. When reshaping, we also rename the `consci` variable into `trust`. 
+`hotcore` : First, the center of the Earth is very hot.
+`radioact` : All radioactivity is man-made. 
+`boyorgrl` : It is the father's gene that decides whether the baby is a boy or a girl. 
+`lasers` : Lasers work by focusing sound waves.
+`electron` : Electrons are smaller than atoms.
+`viruses` : Antibiotics kill viruses as well as bacteria.
+`bigbang` : The universe began with a huge explosion.
+`bigbang2` : The universe has been expanding ever since it began.
+`bigbang1` : According to astronomers, the universe began with a huge explosion
+`condrift` : The continents on which we live have been moving their locations for millions of years and will continue to move in the future. 
+`evolved` : Human beings, as we know them today, developed from earlier species of animals.
+`evolved2` : Elephants, as we know them today, descended from earlier species of animals.
+(`earthsun` and `solarrev` are not TRUE/FALSE question, we did not take them in account.)
+
+
 
 ```{r}
+
+
+
 reshape_data <- function(df, panel_name) {
   
   # reduce data frame to key variables
+  
   reduced <- df %>%
-    select(starts_with("id_1"), starts_with("year_"), starts_with("con")) %>%
+    select(starts_with("id_1"), starts_with("year_"), starts_with("consci"), starts_with(c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift","evolved"))) %>%
+  
     # add variables
     mutate(panel = panel_name, 
            country = "United States") %>% 
@@ -751,17 +788,16 @@ reshape_data <- function(df, panel_name) {
     # rename id variable
     rename(id = starts_with("id"))
   
-  
   # shape to long format
   reshaped <- reduced %>%
     pivot_longer(!c(starts_with("id"), panel, country), names_to = "oldname_wave", values_to = "score") %>%
     separate_wider_delim(oldname_wave, delim = "_", names = c("old_name", "wave")) %>%
     pivot_wider(names_from = old_name, values_from = score) %>% 
-    # rename trust variable
-    mutate(trust = consci)
+    rename(trust = consci)
   
   return(reshaped)
-}
+  
+   }
 
 # Apply the function to each data frame in the list
 gss_panel <- lapply(names(gss_panel), function(panel_name) {
@@ -780,26 +816,24 @@ gss_panel$panel_20 <- gss_panel$panel_20 %>%
                      paste0(id2, "b"))) %>% 
   select(id, everything()) %>%  # Move 'id' to the first column 
   select(-c(id1, id2))
-
 ```
 
-## Rervse and code NA's
+
+## Reverse and code NA's
 
 We code invalid responses as `NA` and reverse the value coding such that higher values represent higher trust. 
+We have to transform panel_06/08/10 id column to character because panel_20 is a character type, and we need to bind all of the id columns.
 
 ```{r}
-# reverse scale
+# reverse scale and transform id as a character type
 reverse_scales <- function(df) {
   df <- df %>% 
-    mutate(across(!c(starts_with("id"), year, panel, wave, country),
-                  ~ 4-.x ), 
-           id = as.character(id)) 
+    mutate(trust = 4 - trust,
+           id = as.character(id))
 }
 
 # Apply the function to each data frame in the list
 gss_panel <- lapply(gss_panel, reverse_scales)
-
-gss_panel$panel_20
 ```
 
 ## Make common data frame
@@ -808,30 +842,30 @@ We store all panels in a single data frame. Importantly, we need to make sure th
 
 ```{r}
 # turn all into one single data set
-gss_panel <- bind_rows(gss_panel) %>% 
-  # make a unique id
-  mutate(id = paste0(id, "_", panel))
+gss_panel <- bind_rows(gss_panel) 
 ```
-
-### Covariates
-
-We add a scale variable. 
-
-```{r}
-gss_panel <- gss_panel %>% 
-  mutate(scale = max(trust, na.rm = TRUE))
-```
-
 
 ## Export
 
 ```{r}
 gss_panel_cleaned <- gss_panel  %>% 
   mutate(data = "gss_panel") %>% 
-  select(id, trust, scale, year, country, data)
+  select(names(gss_panel)) %>% 
+
+  #in panel_08, evolved1 variable has a different name
+  rename(evolved1 = EVOLVED1)  %>% 
+  
+  # there are 2 variable names for the same questions, bigbang1 and BIGBANG1 (panel_08).
+  mutate(bigbang1 = coalesce(bigbang1, BIGBANG1)) %>% 
+  select(-BIGBANG1) %>% 
+  
+  # TRUE,FALSE instead of 1,2
+  mutate_at(vars(c(starts_with(c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift","evolved")))), ~if_else(. == 1, TRUE, FALSE))
 
 write_csv(gss_panel_cleaned, "data/gss_panel/gss_panel_cleaned.csv")
 ```
+
+
 
 # Algan data
 
@@ -1098,20 +1132,3 @@ barometer_cleaned <- barometer  %>%
 
 write_csv(barometer_cleaned, "data/wissenschaftsbarometer/wissenschaftsbarometer_cleaned.csv")
 ```
-
-## Some example change
-
-Hi Jan !
-
-blablabla
-ofpjfeofe
-
-This is good, but I would add this. 
-
-```{r}
-#hi
-7+3
-```
-
-petit test
-
