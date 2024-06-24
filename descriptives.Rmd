@@ -135,7 +135,7 @@ ggplot(plot_data, aes(x = year, y = mean_trust)) +
   scale_y_continuous(limits = c(1, 3))
 ```
 
-## Compare with other variables
+### Compare with other variables
 
 ```{r}
 plot_data <- data_list$gss_cross %>% 
@@ -151,6 +151,83 @@ ggplot(plot_data, aes(x = year, y = mean_trust, colour = variable)) +
   geom_point(size = 1.5) + 
   scale_y_continuous(limits = c(1, 3))
 ```
+
+## Science and knowledge
+
+It is absolutely necessary to find out how many (and which) questions have been asked in each year. Otherwise we cannot compare the share of correctly answered questions. If that's impossible, we can ignore NA's and compute the share of correct answers among correct + false answers. 
+
+```{r}
+knowledge_variables <- c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift", "evolved", "earthsun", "bigbang2", "bigbang1", "evolved2")
+
+# designate a wide format
+d_wide <- data_list$gss_cross %>% 
+    mutate(id = 1:nrow(.))
+
+# make long format data
+d_long <- d_wide %>% 
+  pivot_longer(cols = all_of(knowledge_variables), 
+               names_to = "question", values_to = "answer") 
+
+# make a version with averages per participant
+d_avg <- d_long %>% 
+  # make numeric versions
+  mutate(knowledge = case_when(answer == TRUE ~ 1, 
+                               answer == FALSE ~ 0, 
+                               TRUE ~ NA)
+  ) %>% 
+  group_by(id) %>% 
+  # calculate by-participant averages
+  # the code below ensures that for participants with only NA's, 
+  # the average will be NA, too, not 0
+  summarize(avg_knowledge =  if 
+            (all(is.na(knowledge))) NA_real_ 
+            else 
+              #sum(knowledge, na.rm = TRUE)/sum(!is.na(knowledge))
+              sum(knowledge, na.rm = TRUE)/n(), 
+            n_knowledge_questions = if 
+            (all(is.na(knowledge))) NA_real_ 
+            else 
+              #sum(knowledge, na.rm = TRUE)/sum(!is.na(knowledge))
+              n()
+  )
+
+# make data frame with average particpant data and wide format
+d_wide <- left_join(d_wide %>% 
+                 select(-all_of(knowledge_variables)), 
+               d_avg, 
+               by = "id")
+
+# Check
+table(d_wide$avg_knowledge, useNA = "always")
+
+table(d_wide$n_knowledge_questions, useNA = "always")
+```
+
+Science knowledge through time
+ 
+```{r}
+plot_data <- d_wide %>% 
+  group_by(year) %>% 
+  summarize(mean_knowledge = mean(avg_knowledge, na.rm = TRUE), 
+            n = n()) %>% 
+  drop_na(mean_knowledge)
+
+ggplot(plot_data, aes(x = year, y = mean_knowledge)) +
+  geom_line() + 
+  geom_point(size = 1.5) 
+```
+
+Something is weird for 2021. In fact, it seems that only the question on viruses has been asked
+
+```{r}
+# check data from 2021
+d_long %>% 
+  filter(year == 2021) %>% 
+  select(id, question, answer) %>% 
+  group_by(question) %>% 
+  summarize(n_valid_answers = sum(!is.na(answer)))
+```
+
 
 ## Panel data
 

@@ -45,6 +45,40 @@ gss_cross[gss_cross$year == 1983, c("consci", "trust")]
 
 ## Covariates
 
+### Knowledge
+
+In the codebook, variables can be found under the keyword "SCI KNOWLEDGE". 
+
+For knowledge variables, 1 means TRUE and 2 means FALSE. 8 means "don't know", which we will code as false, too. 
+
+Two special questions: 
+
+- For `earthsun`, the correct answer is 1 as for the others
+- For `solarrev`, the correct answer is 3. 
+
+```{r}
+knowledge_variables <- c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift", "evolved", "earthsun", "bigbang2", "bigbang1", "evolved2", "solarrev")
+
+# all knowledge variables except solarrev
+knowledge_variables_true_false <- knowledge_variables[!knowledge_variables %in% "solarrev"]
+
+# Apply transformations using mutate(across()) excluding "solarrev"
+gss_cross <- gss_cross %>% 
+  mutate(across(all_of(knowledge_variables_true_false), 
+                ~ case_when(.x == 1 ~ TRUE, 
+                            .x %in% c(2,8) ~ FALSE, 
+                            TRUE ~ NA)
+  )
+  ) %>% 
+  mutate(across(solarrev,  
+                ~ case_when(.x == 3 ~ TRUE, 
+                            .x %in% c(1,2,8) ~ FALSE, 
+                            TRUE ~ NA)
+                )
+         )
+
+```
+
 A `year` variable already exists. 
 
 ```{r}
@@ -107,7 +141,7 @@ gss_cross <- gss_cross %>%
 ```{r}
 gss_cross_cleaned <- gss_cross %>% 
   mutate(data = "gss_cross") %>% 
-  select(trust, scale, country, year, starts_with("con"), data)
+  select(data, year, country, scale, trust, knowledge_variables, starts_with("con"))
 
 write_csv(gss_cross_cleaned, "data/gss_cross/gss_cross_cleaned.csv")
 ```
@@ -745,6 +779,35 @@ sjlabelled::get_label(gss_panel$panel_06$consci_1)
 sjlabelled::val_labels(gss_panel$panel_06$consci_1)
 ```
 
+## Knowledge
+
+Knowledge variables (TRUE/FALSE questions) : "I would like to ask you a few short questions like those you might see on a television game show. For each statement that I read, please tell me if it is true or false. If you don't know or aren't sure, just tell me so, and we will skip to the next question. Remember true, false, or don’t know.)"
+
+`hotcore` : First, the center of the Earth is very hot.
+`radioact` : All radioactivity is man-made. 
+`boyorgrl` : It is the father's gene that decides whether the baby is a boy or a girl. 
+`lasers` : Lasers work by focusing sound waves.
+`electron` : Electrons are smaller than atoms.
+`viruses` : Antibiotics kill viruses as well as bacteria.
+`bigbang` : The universe began with a huge explosion.
+`bigbang2` : The universe has been expanding ever since it began.
+`bigbang1` : According to astronomers, the universe began with a huge explosion
+`condrift` : The continents on which we live have been moving their locations for millions of years and will continue to move in the future. 
+`evolved` : Human beings, as we know them today, developed from earlier species of animals.
+`evolved2` : Elephants, as we know them today, descended from earlier species of animals.
+
+Two special questions: 
+
+- For `earthsun`, the correct answer is 1 as for the others
+- For `solarrev`, the correct answer is 3. 
+
+```{r}
+knowledge_variables <- c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift", "evolved", "earthsun", "bigbang2", "bigbang1", "evolved2", "solarrev")
+
+# all knowledge variables except solarrev
+knowledge_variables_true_false <- knowledge_variables[!knowledge_variables %in% "solarrev"]
+```
+
 ## Reduce and reshape data
 
 We start with reducing the data in order to reduce processing time. When reshaping, we also rename the `consci` variable into `trust`. 
@@ -752,9 +815,15 @@ We start with reducing the data in order to reduce processing time. When reshapi
 ```{r}
 reshape_data <- function(df, panel_name) {
   
+  # Convert all variable names to lowercase
+  df <- df %>%
+  rename_with(tolower)
+  
   # reduce data frame to key variables
   reduced <- df %>%
-    select(starts_with("id_1"), starts_with("year_"), starts_with("con")) %>%
+    select(starts_with("id_1"), starts_with("year_"), starts_with("con"),
+           starts_with(c("hotcore", "radioact", "boyorgrl", "lasers", "electron", "viruses", "bigbang", "condrift", "evolved", "earthsun", "bigbang2", "bigbang1", "evolved2", "solarrev"))
+           ) %>%
     # add variables
     mutate(panel = panel_name, 
            country = "United States") %>% 
@@ -830,11 +899,13 @@ gss_panel$panel_20 %>%
 
 We code invalid responses as `NA` and reverse the value coding such that higher values represent higher trust. 
 
+We have to transform panel_06/08/10 id column to character because panel_20 is a character type, and we need to bind all of the id columns.
+
 ```{r}
-# reverse scale
+# reverse scale and transform id as a character type
 reverse_scales <- function(df) {
   df <- df %>% 
-    mutate(across(!c(starts_with("id"), year, panel, wave, country),
+    mutate(across(c(starts_with("con"), trust),
                   ~ 4-.x ), 
            id = as.character(id)) 
 }
@@ -893,12 +964,33 @@ gss_panel <- gss_panel %>%
   mutate(scale = max(trust, na.rm = TRUE))
 ```
 
+### Knowledge
+
+For knowledge variables, 1 means TRUE and 2 means FALSE
+
+```{r}
+# Apply transformations using mutate(across()) excluding "solarrev"
+gss_panel <- gss_panel %>%  
+  mutate(across(any_of(knowledge_variables_true_false), 
+                ~ case_when(.x == 1 ~ TRUE, 
+                            .x %in% c(2,8) ~ FALSE, 
+                            TRUE ~ NA)
+  )
+  ) %>% 
+  mutate(across(solarrev,  
+                ~ case_when(.x == 3 ~ TRUE, 
+                            .x %in% c(1,2,8) ~ FALSE, 
+                            TRUE ~ NA)
+                )
+         )
+```
+
+
 ## Export
 
 ```{r}
 gss_panel_cleaned <- gss_panel  %>% 
-  mutate(data = "gss_panel") %>% 
-  select(id, trust, scale, year, country, data)
+  mutate(data = "gss_panel") 
 
 write_csv(gss_panel_cleaned, "data/gss_panel/gss_panel_cleaned.csv")
 ```
@@ -1207,19 +1299,4 @@ barometer_cleaned <- barometer  %>%
 
 write_csv(barometer_cleaned, "data/wissenschaftsbarometer/wissenschaftsbarometer_cleaned.csv")
 ```
-
-## Some example change
-
-Hi Jan !
-
-blablabla
-ofpjfeofe
-
-This is good, but I would add this. 
-
-```{r}
-#hi
-7+3
-```
-
 
